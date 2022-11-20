@@ -64,7 +64,8 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
-
+		Mint { sender: T::AccountId, token_a_amount: T::Balance, token_b_amount: T::Balance },
+		Burn { to: T::AccountId, token_a_amount: T::Balance, token_b_amount: T::Balance },
 	}
 
 	// #[pallet::genesis_build]
@@ -236,6 +237,7 @@ pub mod pallet {
 			T::AssetsManager::mint_into(T::PoolToken::get(), &to, liquidity)?;
 			<PoolReserves<T>>::insert(Self::token_a(), token_a_balance);
 			<PoolReserves<T>>::insert(Self::token_b(), token_b_balance);
+			Self::deposit_event(Event::<T>::Mint { sender : to, token_a_amount: amount_a, token_b_amount: amount_b });
 			Ok(())
 		}
 
@@ -279,6 +281,7 @@ pub mod pallet {
 			<PoolReserves<T>>::insert(Self::token_a(), token_a_balance);
 			<PoolReserves<T>>::insert(Self::token_b(), token_b_balance);
 
+			Self::deposit_event(Event::<T>::Burn { to, token_a_amount: amount_a, token_b_amount: amount_b });
 			Ok(())
 		}
 	}
