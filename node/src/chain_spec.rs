@@ -1,5 +1,5 @@
 use node_template_runtime::{
-	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig, Signature, SudoConfig,
+	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig, Signature, SudoConfig,AssetsConfig,
 	SystemConfig, WASM_BINARY,
 };
 use sc_service::ChainType;
@@ -7,6 +7,7 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_core::{sr25519, Pair, Public};
 use sp_finality_grandpa::AuthorityId as GrandpaId;
 use sp_runtime::traits::{IdentifyAccount, Verify};
+use node_template_runtime::constants::currency::{MILLICENTS, TOKEN_UNIT};
 
 // The URL for the telemetry server.
 // const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
@@ -149,8 +150,30 @@ fn testnet_genesis(
 		},
 		sudo: SudoConfig {
 			// Assign network admin rights.
-			key: Some(root_key),
+			key: Some(root_key.clone()),
 		},
 		transaction_payment: Default::default(),
+		assets : AssetsConfig {
+			//Genesis assets: id, owner, is_sufficient, min_balance
+			assets : vec![
+				(1_u32, root_key.clone(), true, 1 * MILLICENTS),
+				(2_u32, root_key.clone(), true, 1 * MILLICENTS),
+				(3_u32, root_key.clone(), true, 1 * MILLICENTS)
+			],
+			// Genesis metadata: id, name, symbol, decimals
+			metadata : vec![
+				(1_u32, b"USDCoin".to_vec(),b"USDC".to_vec(), 12),
+				(2_u32, b"Bitcoin".to_vec(),b"BTC".to_vec(), 12),
+				(3_u32, b"USDC/BTC".to_vec(),b"USDCBTC".to_vec(), 12),
+			],
+			// Genesis accounts: id, account_id, balance
+			accounts: endowed_accounts.into_iter().map(|account_id| {
+				[
+					(1_u32, account_id.clone(), 100_000 * TOKEN_UNIT),
+					(2_u32, account_id, 100_000 * TOKEN_UNIT)
+				]
+			}).flatten().collect(),
+		},
+		council : Default::default()
 	}
 }

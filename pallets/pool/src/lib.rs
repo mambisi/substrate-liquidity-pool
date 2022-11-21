@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 pub use pallet::*;
 
 #[frame_support::pallet]
@@ -9,8 +11,9 @@ pub mod pallet {
 		traits::fungibles::{Create, Inspect, Mutate, Transfer},
 		PalletId,
 	};
+	use frame_support::log;
 	use frame_system::pallet_prelude::*;
-	use std::{
+	use core::{
 		cmp::min,
 		ops::{Mul, Sub},
 	};
@@ -26,10 +29,7 @@ pub mod pallet {
 	pub trait Config: frame_system::Config + pallet_balances::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-		type GovernanceOrigin: EnsureOrigin<
-			Self::RuntimeOrigin,
-			Success = <Self as frame_system::Config>::AccountId,
-		>;
+		type GovernanceOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
 		type AssetId: Member
 			+ Parameter
@@ -64,7 +64,7 @@ pub mod pallet {
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		Mint { sender: T::AccountId, token_a_amount: T::Balance, token_b_amount: T::Balance },
+		Mint { sender: T::AccountId, token_a_amount: T::Balance, token_b_amount: T::Balance, liquidity: T::Balance },
 		Burn { to: T::AccountId, token_a_amount: T::Balance, token_b_amount: T::Balance },
 	}
 
@@ -88,43 +88,23 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(10_000)]
 		pub fn initialize_pool(
-			origin: OriginFor<T>,
-			token_a_reserves: T::Balance,
-			token_b_reserves: T::Balance,
+			origin: OriginFor<T>
 		) -> DispatchResult {
-            let fund_manager = T::GovernanceOrigin::ensure_origin(origin)?;
+			T::GovernanceOrigin::ensure_origin(origin.clone())?;
 			// Ensure that the Pool is not already initialized
+			let (token_a,token_b) = Self::token_pair();
 			ensure!(
-				!<PoolReserves<T>>::contains_key(T::TokenA::get()),
+				!<PoolReserves<T>>::contains_key(token_a),
 				Error::<T>::PoolAlreadyInitialized
 			);
 			ensure!(
-				!<PoolReserves<T>>::contains_key(T::TokenB::get()),
+				!<PoolReserves<T>>::contains_key(token_b),
 				Error::<T>::PoolAlreadyInitialized
 			);
 			// Initialize Pool Reserves
 			<PoolReserves<T>>::insert(T::TokenA::get(), T::Balance::zero());
 			<PoolReserves<T>>::insert(T::TokenB::get(), T::Balance::zero());
-			T::AssetsManager::can_withdraw(T::TokenA::get(), &fund_manager, token_a_reserves).into_result()?;
-			T::AssetsManager::can_withdraw(T::TokenB::get(), &fund_manager, token_b_reserves).into_result()?;
-
-			// Add tokens to fund account
-			T::AssetsManager::transfer(
-				T::TokenA::get(),
-				&fund_manager,
-				&Self::fund_account_id(),
-				token_a_reserves,
-				false,
-			)?;
-			T::AssetsManager::transfer(
-				T::TokenB::get(),
-				&fund_manager,
-				&Self::fund_account_id(),
-				token_b_reserves,
-				false,
-			)?;
-			// Mint LP tokens into fund manager account
-			Self::mint(fund_manager)
+			Ok(())
 		}
 
 		#[pallet::weight(10_000)]
@@ -135,13 +115,21 @@ pub mod pallet {
 			token_a_min_amount: T::Balance,
 			token_b_min_amount: T::Balance,
 		) -> DispatchResult {
+			let (token_a, token_b) = Self::token_pair();
+			ensure!(
+				<PoolReserves<T>>::contains_key(token_a),
+				Error::<T>::PoolNotInitialized
+			);
+			ensure!(
+				<PoolReserves<T>>::contains_key(token_b),
+				Error::<T>::PoolNotInitialized
+			);
 			let sender = ensure_signed(origin)?;
 			let (token_a_amount, token_b_amount) = Self::_add_liquidity(token_a_amount, token_b_amount, token_a_min_amount, token_b_min_amount)?;
-			let (token_a, token_b) = Self::token_pair();
 			T::AssetsManager::can_withdraw(token_a, &sender, token_a_amount).into_result()?;
 			T::AssetsManager::can_withdraw(token_b, &sender, token_b_amount).into_result()?;
-			T::AssetsManager::transfer(token_a, &sender, &Self::fund_account_id(), token_a_amount,false)?;
-			T::AssetsManager::transfer(token_b, &sender, &Self::fund_account_id(), token_b_amount,false)?;
+			T::AssetsManager::transfer(token_a, &sender, &Self::fund_account_id(), token_a_amount,true)?;
+			T::AssetsManager::transfer(token_b, &sender, &Self::fund_account_id(), token_b_amount,true)?;
 			Self::mint(sender)
 		}
 
@@ -150,8 +138,17 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			liquidity: T::Balance
 		) -> DispatchResult {
+			let (token_a, token_b) = Self::token_pair();
+			ensure!(
+				<PoolReserves<T>>::contains_key(token_a),
+				Error::<T>::PoolNotInitialized
+			);
+			ensure!(
+				<PoolReserves<T>>::contains_key(token_b),
+				Error::<T>::PoolNotInitialized
+			);
 			let sender = ensure_signed(origin)?;
-			T::AssetsManager::transfer(Self::pair_token(), &sender, &Self::fund_account_id(), liquidity,false)?;
+			T::AssetsManager::transfer(Self::pair_token(), &sender, &Self::fund_account_id(), liquidity,true)?;
 			Self::burn(sender)
 		}
 	}
@@ -237,7 +234,7 @@ pub mod pallet {
 			T::AssetsManager::mint_into(T::PoolToken::get(), &to, liquidity)?;
 			<PoolReserves<T>>::insert(Self::token_a(), token_a_balance);
 			<PoolReserves<T>>::insert(Self::token_b(), token_b_balance);
-			Self::deposit_event(Event::<T>::Mint { sender : to, token_a_amount: amount_a, token_b_amount: amount_b });
+			Self::deposit_event(Event::<T>::Mint { sender : to, token_a_amount: amount_a, token_b_amount: amount_b, liquidity });
 			Ok(())
 		}
 

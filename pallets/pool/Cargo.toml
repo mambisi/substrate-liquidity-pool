@@ -1,5 +1,5 @@
 [package]
-name = "pool"
+name = "pallet-pool"
 version = "0.1.0"
 edition = "2021"
 
@@ -29,8 +29,6 @@ std = [
     "codec/std",
     "frame-benchmarking?/std",
     "frame-support/std",
-    "pallet-balances/std",
-    "sp-runtime/std",
     "frame-system/std",
     "scale-info/std",
 ]
