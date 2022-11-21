@@ -328,7 +328,7 @@ parameter_types! {
 	pub const PoolToken: u32 = 3;
 	pub const TokenA: u32 = 1;
 	pub const TokenB: u32 = 2;
-	pub const MinimumLiquidity: u128 = 1 * DOLLARS;
+	pub const MinimumLiquidity: u128 = 1 * TOKEN_UNIT;
 }
 
 impl pallet_pool::Config for Runtime {

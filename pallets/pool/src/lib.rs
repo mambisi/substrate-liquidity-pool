@@ -19,6 +19,7 @@ pub mod pallet {
 	};
 
 	const MODULE_ID: PalletId = PalletId(*b"subswap0");
+	const TREASURY_ID: PalletId = PalletId(*b"treasury");
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub (super) trait Store)]
@@ -157,6 +158,9 @@ pub mod pallet {
 		pub fn fund_account_id() -> T::AccountId {
 			MODULE_ID.into_account_truncating()
 		}
+		pub fn treasury_account_id() -> T::AccountId {
+			TREASURY_ID.into_account_truncating()
+		}
 
 		pub fn token_a() -> T::AssetId {
 			T::TokenA::get()
@@ -220,9 +224,9 @@ pub mod pallet {
 
 			let total_supply = T::AssetsManager::total_issuance(Self::pair_token());
 			let liquidity = if total_supply.is_zero() {
-				// Mint Minimum LP tokens
-				// T::AssetsManager::mint_into(Self::pair_token(), 0_i32.into_account_truncating(),
-				// T::MinimumLiquidity::get())?;
+				// Lock Minimum LP tokens
+				T::AssetsManager::mint_into(Self::pair_token(), &Self::treasury_account_id(),
+				T::MinimumLiquidity::get())?;
 				(amount_a * amount_b).integer_sqrt().sub(T::MinimumLiquidity::get())
 			} else {
 				min(
