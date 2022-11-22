@@ -333,6 +333,7 @@ parameter_types! {
 impl pallet_pool::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type GovernanceOrigin = EnsureRootOrHalfCouncil;
+	type Currency = Balances;
 	type AssetId = u32;
 	type AssetsManager = Assets;
 	type PoolToken = PoolToken;

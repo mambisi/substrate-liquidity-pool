@@ -1,6 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use frame_support::traits::Currency;
 pub use pallet::*;
+
+type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -15,8 +18,10 @@ pub mod pallet {
 		traits::fungibles::{Create, Inspect, Mutate, Transfer},
 		PalletId,
 	};
+	use frame_support::traits::ReservableCurrency;
 	use frame_system::pallet_prelude::*;
-	use sp_runtime::{Perquintill, SaturatedConversion};
+	use sp_runtime::{Percent, SaturatedConversion};
+	use crate::BalanceOf;
 
 	const MODULE_ID: PalletId = PalletId(*b"subswap0");
 	const TREASURY_ID: PalletId = PalletId(*b"treasury");
@@ -27,10 +32,11 @@ pub mod pallet {
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
-	pub trait Config: frame_system::Config + pallet_balances::Config {
+	pub trait Config: frame_system::Config{
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type GovernanceOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+		type Currency: ReservableCurrency<Self::AccountId>;
 
 		type AssetId: Member
 			+ Parameter
@@ -43,7 +49,7 @@ pub mod pallet {
 		type AssetsManager: Create<<Self as frame_system::Config>::AccountId>
 			+ Mutate<
 				<Self as frame_system::Config>::AccountId,
-				Balance = Self::Balance,
+				Balance = BalanceOf<Self>,
 				AssetId = Self::AssetId,
 			> + Inspect<<Self as frame_system::Config>::AccountId>
 			+ Transfer<<Self as frame_system::Config>::AccountId>;
@@ -55,32 +61,32 @@ pub mod pallet {
 		#[pallet::constant]
 		type TokenB: Get<Self::AssetId>;
 		#[pallet::constant]
-		type MinimumLiquidity: Get<Self::Balance>;
+		type MinimumLiquidity: Get<BalanceOf<Self>>;
 	}
 
 	#[pallet::storage]
 	#[pallet::getter(fn pool_reserves)]
-	pub type PoolReserves<T: Config> = StorageMap<_, Blake2_128Concat, T::AssetId, T::Balance>;
+	pub type PoolReserves<T: Config> = StorageMap<_, Blake2_128Concat, T::AssetId, BalanceOf<T>>;
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		Mint {
 			sender: T::AccountId,
-			token_a_amount: T::Balance,
-			token_b_amount: T::Balance,
-			liquidity: T::Balance,
+			token_a_amount: BalanceOf<T>,
+			token_b_amount: BalanceOf<T>,
+			liquidity: BalanceOf<T>,
 		},
 		Burn {
 			to: T::AccountId,
-			token_a_amount: T::Balance,
-			token_b_amount: T::Balance,
+			token_a_amount: BalanceOf<T>,
+			token_b_amount: BalanceOf<T>,
 		},
 		AlterPoolDistribution {
-			prev_reserve_a: T::Balance,
-			prev_reserve_b: T::Balance,
-			reserve_a: T::Balance,
-			reserve_b: T::Balance,
+			prev_reserve_a: BalanceOf<T>,
+			prev_reserve_b: BalanceOf<T>,
+			reserve_a: BalanceOf<T>,
+			reserve_b: BalanceOf<T>,
 		},
 	}
 
@@ -93,6 +99,7 @@ pub mod pallet {
 		PoolAlreadyInitialized,
 		InsufficientAAmount,
 		InsufficientBAmount,
+		RationErrorMustBeBetween0to1,
 	}
 
 	#[pallet::call]
@@ -105,18 +112,18 @@ pub mod pallet {
 			ensure!(!<PoolReserves<T>>::contains_key(token_a), Error::<T>::PoolAlreadyInitialized);
 			ensure!(!<PoolReserves<T>>::contains_key(token_b), Error::<T>::PoolAlreadyInitialized);
 			// Initialize Pool Reserves
-			<PoolReserves<T>>::insert(T::TokenA::get(), T::Balance::zero());
-			<PoolReserves<T>>::insert(T::TokenB::get(), T::Balance::zero());
+			<PoolReserves<T>>::insert(T::TokenA::get(), BalanceOf::<T>::zero());
+			<PoolReserves<T>>::insert(T::TokenB::get(), BalanceOf::<T>::zero());
 			Ok(())
 		}
 
 		#[pallet::weight(10_000)]
 		pub fn add_liquidity(
 			origin: OriginFor<T>,
-			token_a_amount: T::Balance,
-			token_b_amount: T::Balance,
-			token_a_min_amount: T::Balance,
-			token_b_min_amount: T::Balance,
+			token_a_amount: BalanceOf<T>,
+			token_b_amount: BalanceOf<T>,
+			token_a_min_amount: BalanceOf<T>,
+			token_b_min_amount: BalanceOf<T>,
 		) -> DispatchResult {
 			let (token_a, token_b) = Self::token_pair();
 			ensure!(<PoolReserves<T>>::contains_key(token_a), Error::<T>::PoolNotInitialized);
@@ -148,7 +155,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000)]
-		pub fn remove_liquidity(origin: OriginFor<T>, liquidity: T::Balance) -> DispatchResult {
+		pub fn remove_liquidity(origin: OriginFor<T>, liquidity: BalanceOf<T>) -> DispatchResult {
 			let (token_a, token_b) = Self::token_pair();
 			ensure!(<PoolReserves<T>>::contains_key(token_a), Error::<T>::PoolNotInitialized);
 			ensure!(<PoolReserves<T>>::contains_key(token_b), Error::<T>::PoolNotInitialized);
@@ -166,7 +173,7 @@ pub mod pallet {
 		#[pallet::weight(10_000)]
 		pub fn change_pool_distribution(
 			origin: OriginFor<T>,
-			ratio_token_a_per_token_b: Perquintill,
+			ratio_token_a_per_token_b: Percent,
 		) -> DispatchResult {
 			T::GovernanceOrigin::ensure_origin(origin.clone())?;
 			let (token_a, token_b) = Self::token_pair();
@@ -177,12 +184,12 @@ pub mod pallet {
 			let token_b_reserve =
 				<PoolReserves<T>>::get(&token_b).ok_or(Error::<T>::PoolNotInitialized)?;
 			let fund_account = Self::fund_account_id();
-			let new_token_a_reserve : T::Balance = ratio_token_a_per_token_b.mul_ceil::<u128>((token_a_reserve + token_b_reserve).saturated_into::<u128>()).saturated_into();
-			if new_token_a_reserve > token_b_reserve {
+			let new_token_a_reserve : BalanceOf<T> = ratio_token_a_per_token_b.mul_ceil::<u128>((token_a_reserve + token_b_reserve).saturated_into::<u128>()).saturated_into();
+			if new_token_a_reserve > token_a_reserve {
 				let diff = new_token_a_reserve - token_a_reserve;
 				T::AssetsManager::burn_from(token_b, &fund_account, diff)?;
 				T::AssetsManager::mint_into(token_a, &fund_account, diff)?;
-			} else if new_token_a_reserve < token_b_reserve {
+			} else if new_token_a_reserve < token_a_reserve {
 				let diff = token_a_reserve - new_token_a_reserve;
 				T::AssetsManager::burn_from(token_a, &fund_account, diff)?;
 				T::AssetsManager::mint_into(token_b, &fund_account, diff)?;
@@ -211,35 +218,30 @@ pub mod pallet {
 			TREASURY_ID.into_account_truncating()
 		}
 
-		pub fn token_a() -> T::AssetId {
-			T::TokenA::get()
-		}
-
 		pub fn token_pair() -> (T::AssetId, T::AssetId) {
 			(T::TokenA::get(), T::TokenB::get())
 		}
 
-		pub fn token_b() -> T::AssetId {
-			T::TokenA::get()
-		}
 		pub fn pair_token() -> T::AssetId {
 			T::PoolToken::get()
 		}
 
-		pub fn minimum_liquidity() -> T::Balance {
+		pub fn minimum_liquidity() -> BalanceOf<T> {
 			T::MinimumLiquidity::get()
 		}
 
 		fn _add_liquidity(
-			token_a_amount: T::Balance,
-			token_b_amount: T::Balance,
-			token_a_min_amount: T::Balance,
-			token_b_min_amount: T::Balance,
-		) -> Result<(T::Balance, T::Balance), DispatchError> {
+			token_a_amount: BalanceOf<T>,
+			token_b_amount: BalanceOf<T>,
+			token_a_min_amount: BalanceOf<T>,
+			token_b_min_amount: BalanceOf<T>,
+		) -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
+			let (token_a, token_b) = Self::token_pair();
+
 			let token_a_reserve =
-				<PoolReserves<T>>::get(&Self::token_a()).ok_or(Error::<T>::PoolNotInitialized)?;
+				<PoolReserves<T>>::get(&token_a).ok_or(Error::<T>::PoolNotInitialized)?;
 			let token_b_reserve =
-				<PoolReserves<T>>::get(&Self::token_b()).ok_or(Error::<T>::PoolNotInitialized)?;
+				<PoolReserves<T>>::get(&token_b).ok_or(Error::<T>::PoolNotInitialized)?;
 			return if token_a_reserve.is_zero() && token_b_reserve.is_zero() {
 				Ok((token_a_amount, token_b_amount))
 			} else {
@@ -263,19 +265,20 @@ pub mod pallet {
 			}
 		}
 
-		fn quote(amount_a: T::Balance, reserve_a: T::Balance, reserve_b: T::Balance) -> T::Balance {
+		fn quote(amount_a: BalanceOf<T>, reserve_a: BalanceOf<T>, reserve_b: BalanceOf<T>) -> BalanceOf<T> {
 			amount_a.mul(reserve_b) / reserve_a
 		}
 
 		fn mint(to: T::AccountId) -> DispatchResult {
+			let (token_a, token_b) = Self::token_pair();
 			let fund_account = Self::fund_account_id();
-			let token_a_balance = T::AssetsManager::balance(Self::token_a(), &fund_account);
-			let token_b_balance = T::AssetsManager::balance(Self::token_b(), &fund_account);
+			let token_a_balance = T::AssetsManager::balance(token_a, &fund_account);
+			let token_b_balance = T::AssetsManager::balance(token_b, &fund_account);
 
 			let token_a_reserve =
-				<PoolReserves<T>>::get(&Self::token_a()).ok_or(Error::<T>::PoolNotInitialized)?;
+				<PoolReserves<T>>::get(&token_a).ok_or(Error::<T>::PoolNotInitialized)?;
 			let token_b_reserve =
-				<PoolReserves<T>>::get(&Self::token_b()).ok_or(Error::<T>::PoolNotInitialized)?;
+				<PoolReserves<T>>::get(&token_b).ok_or(Error::<T>::PoolNotInitialized)?;
 			let amount_a = token_a_balance.sub(token_a_reserve);
 			let amount_b = token_b_balance.sub(token_b_reserve);
 
@@ -296,8 +299,8 @@ pub mod pallet {
 			};
 
 			T::AssetsManager::mint_into(T::PoolToken::get(), &to, liquidity)?;
-			<PoolReserves<T>>::insert(Self::token_a(), token_a_balance);
-			<PoolReserves<T>>::insert(Self::token_b(), token_b_balance);
+			<PoolReserves<T>>::insert(token_a, token_a_balance);
+			<PoolReserves<T>>::insert(token_b, token_b_balance);
 			Self::deposit_event(Event::<T>::Mint {
 				sender: to,
 				token_a_amount: amount_a,
@@ -324,8 +327,8 @@ pub mod pallet {
 
 			T::AssetsManager::burn_from(Self::pair_token(), &Self::fund_account_id(), liquidity)?;
 
-			T::AssetsManager::transfer(token_a, &Self::fund_account_id(), &to, amount_a, false)?;
-			T::AssetsManager::transfer(token_b, &Self::fund_account_id(), &to, amount_b, false)?;
+			T::AssetsManager::transfer(token_a, &fund_account, &to, amount_a, false)?;
+			T::AssetsManager::transfer(token_b, &fund_account, &to, amount_b, false)?;
 
 			let token_a_balance = T::AssetsManager::balance(token_a, &fund_account);
 			let token_b_balance = T::AssetsManager::balance(token_b, &fund_account);
