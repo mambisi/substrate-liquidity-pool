@@ -3,10 +3,11 @@
 #![recursion_limit = "256"]
 
 pub mod constants;
-pub mod primitives;// Make the WASM binary available.
+pub mod primitives; // Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
+use constants::currency::*;
 use pallet_grandpa::{
 	fg_primitives, AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList,
 };
@@ -21,13 +22,13 @@ use sp_runtime::{
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult, MultiSignature,
 };
-use constants::currency::*;
 use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 
 // A few exports that help ease life for downstream crates.
+use frame_support::traits::EitherOfDiverse;
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
@@ -39,7 +40,6 @@ pub use frame_support::{
 	},
 	StorageValue,
 };
-use frame_support::traits::EitherOfDiverse;
 pub use frame_system::Call as SystemCall;
 use frame_system::EnsureRoot;
 pub use pallet_balances::Call as BalancesCall;
@@ -48,7 +48,6 @@ use pallet_transaction_payment::{ConstFeeMultiplier, CurrencyAdapter, Multiplier
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
 pub use sp_runtime::{Perbill, Permill};
-
 
 /// An index to a block.
 pub type BlockNumber = u32;
